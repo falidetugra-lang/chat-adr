@@ -1,6 +1,8 @@
 flask
 gunicorn
 openai
+faiss-cpu
+
 
 
 
