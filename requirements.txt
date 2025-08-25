@@ -1,13 +1,11 @@
-fastapi
-uvicorn
+flask
 gunicorn
 openai>=1.40.0
-chromadb
-sentence-transformers
-faiss-cpu
+faiss-cpu==1.8.0      # si sigues usando FAISS local
 numpy
 tiktoken
-flask
+
+
 
 
 
