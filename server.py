@@ -118,4 +118,3 @@ def spa(path: str):
     if path.startswith("api/"):
         return JSONResponse({"error": "not found"}, status_code=404)
     return FileResponse(PUBLIC / "index.html")
-
