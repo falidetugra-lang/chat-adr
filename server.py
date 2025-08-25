@@ -1,38 +1,64 @@
-from flask import Flask, request, jsonify
-from openai import OpenAI
 import os
+from flask import Flask, send_from_directory, request, jsonify
+from openai import OpenAI
 
-app = Flask(__name__)
+# App estática: servimos /public
+app = Flask(__name__, static_folder="public", static_url_path="/")
 
-# Cliente OpenAI con API Key desde variable de entorno
-client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+# Cliente OpenAI (usa tu OPENAI_API_KEY de Render)
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-@app.route("/api/query", methods=["GET"])
-def query():
-    q = request.args.get("q", "").strip()
-    if not q:
-        return jsonify({"error": "Falta el parámetro 'q'"}), 400
-
-    try:
-        # Llamada a la API de OpenAI
-        response = client.responses.create(
-            model="gpt-5",   # o "gpt-4.1" si no tienes acceso a GPT-5
-            input=q
-        )
-
-        answer = response.output[0].content[0].text
-        return jsonify({"result": answer})
-
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route("/", methods=["GET"])
+# Home -> index.html
+@app.get("/")
 def home():
-    return "✅ API de Chat ADR funcionando"
+    return send_from_directory(app.static_folder, "index.html")
 
+# Healthcheck
+@app.get("/api/ping")
+def api_ping():
+    return jsonify(ok=True)
+
+# Lógica de respuesta del chat (reutilizable)
+def _chat_reply(user_message: str) -> str:
+    if not user_message:
+        return "Escribe una pregunta."
+    try:
+        resp = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {
+                    "role": "system",
+                    "content": "Eres un asistente sobre normativa ADR. Responde breve y claro."
+                },
+                {"role": "user", "content": user_message},
+            ],
+            temperature=0.3,
+        )
+        return resp.choices[0].message.content.strip()
+    except Exception as e:
+        return f"Error consultando el modelo: {e}"
+
+# Endpoint principal de chat
+@app.post("/chat")
+def chat():
+    data = request.get_json(silent=True) or {}
+    message = (data.get("message") or "").strip()
+    answer = _chat_reply(message)
+    return jsonify(answer=answer)
+
+# Alias compatible con el front antiguo (/api/query)
+@app.post("/api/query")
+def api_query():
+    return chat()
+
+# Servir estáticos / SPA fallback
+@app.get("/<path:path>")
+def static_proxy(path):
+    fp = os.path.join(app.static_folder, path)
+    if os.path.exists(fp):
+        return send_from_directory(app.static_folder, path)
+    return send_from_directory(app.static_folder, "index.html")
 
 if __name__ == "__main__":
-    # Solo para pruebas locales
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    app.run(host="0.0.0.0", port=int(os.getenv("PORT", 10000)))
 
