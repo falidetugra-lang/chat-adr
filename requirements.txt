@@ -1,7 +1,14 @@
-flask
+fastapi
+uvicorn
 gunicorn
-openai
+openai>=1.40.0
+chromadb
+sentence-transformers
 faiss-cpu
+numpy
+tiktoken
+
+
 
 
 
