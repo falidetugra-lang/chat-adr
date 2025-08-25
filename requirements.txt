@@ -1,8 +1,5 @@
-fastapi
-uvicorn
-pypdf
-chromadb
-sentence-transformers
-numpy
-tiktoken
+flask
+gunicorn
 openai
+
+
