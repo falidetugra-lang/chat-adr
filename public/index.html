@@ -23,7 +23,7 @@
   <div class="wrap">
     <div class="card">
       <h1>🔎 Consultas ADR</h1>
-      <div class="muted">API: <code>https://chat-adr.onrender.com</code></div>
+      <div class="muted">API: <code id="apiShow"></code></div>
       <div class="row" style="margin:10px 0 6px">
         <input id="q" placeholder="Ej.: exenciones por cantidades limitadas">
         <button id="ask">Preguntar</button>
@@ -33,51 +33,45 @@
     </div>
   </div>
 
-  <script>
-  (function(){
-    const API_BASE = 'https://chat-adr-app.onrender.com';
-    const qEl = document.getElementById('q');
-    const btn = document.getElementById('ask');
-    const resEl = document.getElementById('results');
-    const stEl = document.getElementById('status');
+<script>
+(function(){
+  // Usa el mismo dominio donde está sirviendo Render
+  const API_BASE = location.origin;       // p.ej. https://chat-adr-app.onrender.com
+  document.getElementById('apiShow').textContent = API_BASE;
 
-    async function ask(){
-      const q = (qEl.value||'').trim();
-      if(!q){ qEl.focus(); return; }
-      resEl.innerHTML = '';
-      stEl.textContent = 'Buscando…';
-      try{
-        const url = API_BASE.replace(/\/$/,'') + '/search?q=' + encodeURIComponent(q) + '&k=5&preview_chars=1200';
-        const r = await fetch(url, {headers:{'Accept':'application/json'}});
-        if(!r.ok) throw new Error('HTTP '+r.status);
-        const data = await r.json();
-        const items = (data && data.results) ? data.results : [];
-        stEl.textContent = items.length + ' resultado(s)';
-        if(!items.length){
-          resEl.innerHTML = '<div class="muted">Sin resultados. Ajusta la pregunta.</div>';
-          return;
-        }
-        items.forEach(it=>{
-          const div = document.createElement('div');
-          div.className = 'item';
-          const meta = document.createElement('div');
-          meta.className = 'meta';
-          meta.textContent = `#${it.rank} (score ${Number(it.score).toFixed(3)}) · ${it.source || '—'} · p. ${it.page_from ?? '—'}-${it.page_to ?? '—'}`;
-          const text = document.createElement('div');
-          text.className = 'text';
-          text.textContent = it.text || '';
-          div.appendChild(meta); div.appendChild(text);
-          resEl.appendChild(div);
-        });
-      }catch(e){
-        console.error(e);
-        stEl.textContent = 'Error consultando la API.';
-        resEl.innerHTML = '<div style="color:#fca5a5">No se pudo obtener resultados.</div>';
-      }
+  const qEl  = document.getElementById('q');
+  const btn  = document.getElementById('ask');
+  const resEl= document.getElementById('results');
+  const stEl = document.getElementById('status');
+
+  async function ask(){
+    const q = (qEl.value||'').trim();
+    if(!q){ qEl.focus(); return; }
+    resEl.innerHTML = '';
+    stEl.textContent = 'Buscando…';
+
+    try{
+      const url = `${API_BASE}/api/query?q=${encodeURIComponent(q)}`;
+      const r   = await fetch(url, { headers:{'Accept':'application/json'} });
+      if(!r.ok) throw new Error('HTTP '+r.status);
+      const data = await r.json();   // server.py devuelve { result: "Buscaste: ..." }
+
+      stEl.textContent = 'OK';
+      const div = document.createElement('div');
+      div.className = 'item';
+      div.innerHTML = `<div class="text">${(data.result||'').toString()}</div>`;
+      resEl.appendChild(div);
+
+    }catch(e){
+      console.error(e);
+      stEl.textContent = 'Error consultando la API.';
+      resEl.innerHTML = '<div style="color:#fca5a5">No se pudo obtener resultados.</div>';
     }
-    btn.addEventListener('click', ask);
-    qEl.addEventListener('keydown', (e)=>{ if(e.key==='Enter') ask(); });
-  })();
-  </script>
+  }
+
+  btn.addEventListener('click', ask);
+  qEl.addEventListener('keydown', (e)=>{ if(e.key==='Enter') ask(); });
+})();
+</script>
 </body>
 </html>
