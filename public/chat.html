@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <title>Chat ADR</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 720px; margin: 20px auto; }
+    #log { border: 1px solid #ddd; padding: 12px; border-radius: 8px; min-height: 240px; }
+    .msg-user { color: #111; margin: 8px 0; }
+    .msg-bot  { color: #0b6; margin: 8px 0; white-space: pre-wrap; }
+    .src { font-size: 12px; color: #666; }
+    input, button { font-size: 16px; padding: 8px; }
+  </style>
+</head>
+<body>
+  <h1>Chat ADR</h1>
+  <div id="log"></div>
+  <div style="margin-top:12px;">
+    <input id="q" placeholder="Escribe tu duda…" style="width:75%;" />
+    <button id="send">Preguntar</button>
+  </div>
+
+  <script>
+   const API_BASE = "https://chat-adr-production.up.railway.app";
+
+    const log = document.getElementById('log');
+    const q   = document.getElementById('q');
+    const btn = document.getElementById('send');
+
+    async function ask() {
+      const query = q.value.trim();
+      if (!query) return;
+      log.innerHTML += `<div class="msg-user">🧑‍💼 ${query}</div>`;
+      q.value = ""; btn.disabled = true;
+
+      try {
+        const r = await fetch(`${API_BASE}/chat?q=` + encodeURIComponent(query));
+        const data = await r.json();
+        if (data.answer) {
+          let src = "";
+          if (Array.isArray(data.sources)) {
+            const lines = data.sources.map(s => {
+              const p = (s.page_from!=null || s.page_to!=null) ? ` (p. ${s.page_from}-${s.page_to})` : "";
+              return ` [${s.rank}] ${s.source}${p}`;
+            });
+            src = `\n\nFuentes:\n${lines.join("\n")}`;
+          }
+          log.innerHTML += `<div class="msg-bot">🤖 ${data.answer}${src}</div>`;
+        } else {
+          log.innerHTML += `<div class="msg-bot">⚠️ Error: ${JSON.stringify(data)}</div>`;
+        }
+      } catch(e) {
+        log.innerHTML += `<div class="msg-bot">❌ ${e}</div>`;
+      } finally {
+        btn.disabled = false;
+        log.scrollTop = log.scrollHeight;
+      }
+    }
+
+    btn.onclick = ask;
+    q.addEventListener('keydown', (e) => { if (e.key === 'Enter') ask(); });
+  </script>
+</body>
+</html>
