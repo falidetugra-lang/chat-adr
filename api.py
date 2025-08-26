@@ -1,6 +1,10 @@
 # -*- coding: utf-8 -*-
 from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+
+# Sirve archivos estáticos desde /web (chat.html, css, etc.)
+app.mount("/web", StaticFiles(directory=str(BASE_DIR / "public")), name="web")
 from pathlib import Path
 import os, json, zipfile
 import faiss
@@ -169,6 +173,7 @@ def chat(q: str = Query(..., min_length=2), k: int = 5, max_ctx_chars: int = 120
     answer = resp.choices[0].message.content
 
     return {"answer": answer, "sources": sources}
+
 
 
 
