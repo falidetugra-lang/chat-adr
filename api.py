@@ -2,18 +2,23 @@
 from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from pathlib import Path
-import os, json, faiss, traceback
 from fastapi.staticfiles import StaticFiles
 
-# ===== BASE =====
+from pathlib import Path
+import os
+import json
+import faiss
+import traceback
+
+# ====== Rutas de ficheros ======
 BASE_DIR   = Path(__file__).resolve().parent
 FAISS_PATH = BASE_DIR / "index.faiss"
 META_PATH  = BASE_DIR / "metadata.json"
 TEXTS_PATH = BASE_DIR / "texts.json"
 
-# ===== APP =====
-app = FastAPI(title="ADR Search API", version="1.1.0")
+# ====== App ======
+app = FastAPI(title="ADR Search API", version="1.2.0")
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -22,41 +27,49 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Servir archivos estáticos (ej: chat.html dentro de /public)
+# Sirve chat.html si lo tienes en /public
 if (BASE_DIR / "public").exists():
     app.mount("/web", StaticFiles(directory=str(BASE_DIR / "public")), name="web")
 
-# ===== ESTADO GLOBAL =====
+# ====== Estado global (cache) ======
 index = None
-metas  = None
-texts  = None
-embed_model = None
-gen_client  = None
+metas = None
+texts = None
+embed_model = None       # SentenceTransformer para recuperar en FAISS
+reranker = None          # CrossEncoder para reordenar candidatos
+gen_client = None        # OpenAI para generar la respuesta
 
 
 def lazy_init():
-    """Carga FAISS, metadatos, textos y cliente OpenAI una sola vez."""
+    """
+    Carga índice FAISS, metadatos, textos y cliente OpenAI una sola vez.
+    """
     global index, metas, texts, gen_client
 
+    # Índice FAISS
     if index is None:
         if not FAISS_PATH.exists():
             raise RuntimeError("No se encuentra index.faiss. Genera el índice con ingest.py")
         index = faiss.read_index(str(FAISS_PATH))
 
+    # Metadatos
     if metas is None:
         if not META_PATH.exists():
             raise RuntimeError("No se encuentra metadata.json")
         with open(META_PATH, "r", encoding="utf-8") as f:
-            metas = json.load(f)["metadatas"]
+            metas = json.load(f).get("metadatas", [])
 
+    # Textos (lista de strings)
     if texts is None:
         if not TEXTS_PATH.exists():
             raise RuntimeError("No se encuentra texts.json")
         with open(TEXTS_PATH, "r", encoding="utf-8") as f:
-            texts = json.load(f)
-        if not isinstance(texts, list):
+            t = json.load(f)
+        if not isinstance(t, list):
             raise RuntimeError("texts.json debe ser una lista de strings")
+        texts = t
 
+    # Cliente OpenAI
     if gen_client is None:
         from openai import OpenAI
         api_key = os.getenv("OPENAI_API_KEY")
@@ -65,7 +78,7 @@ def lazy_init():
         gen_client = OpenAI(api_key=api_key)
 
 
-# ===== ENDPOINTS =====
+# ====== Endpoints ======
 @app.get("/health")
 def health():
     try:
@@ -76,20 +89,30 @@ def health():
 
 
 @app.get("/search")
-def search(q: str = Query(..., min_length=2), k: int = 3, preview_chars: int = 500):
+def search(q: str = Query(..., min_length=2),
+           k: int = 3,
+           preview_chars: int = 500):
+    """
+    Búsqueda simple (sin generación). Devuelve trozos recuperados.
+    """
     try:
         lazy_init()
         from sentence_transformers import SentenceTransformer
         global embed_model
         if embed_model is None:
-            embed_model = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2", device="cpu")
+            embed_model = SentenceTransformer(
+                "sentence-transformers/all-MiniLM-L6-v2", device="cpu"
+            )
 
-        q_emb = embed_model.encode([q], convert_to_numpy=True, normalize_embeddings=True).astype("float32")
+        q_emb = embed_model.encode(
+            [q], convert_to_numpy=True, normalize_embeddings=True
+        ).astype("float32")
+
         D, I = index.search(q_emb, k)
 
         results = []
         for rank, idx in enumerate(I[0]):
-            if idx < 0: 
+            if idx < 0:
                 continue
             m = metas[idx]
             frag = texts[idx] if idx < len(texts) else ""
@@ -105,52 +128,124 @@ def search(q: str = Query(..., min_length=2), k: int = 3, preview_chars: int = 5
                 "text": frag
             })
         return {"query": q, "k": k, "results": results}
+
     except Exception as e:
         print(traceback.format_exc())
         return JSONResponse(status_code=500, content={"error": str(e)})
 
 
 @app.get("/chat")
-def chat(q: str = Query(..., min_length=2), k: int = 5, max_ctx_chars: int = 12000):
+def chat(q: str = Query(..., min_length=2),
+         k_faiss: int = 20,           # pedimos bastantes candidatos a FAISS
+         top_n: int = 5,              # nos quedamos con pocos tras reranking
+         max_ctx_chars: int = 12000,  # límite de contexto a enviar al modelo
+         min_rerank_score: float = 0.25  # umbral mínimo de relevancia
+         ):
+    """
+    Chat RAG: recupera de FAISS, reranquea con CrossEncoder, genera respuesta con OpenAI.
+    """
     try:
         lazy_init()
-        from sentence_transformers import SentenceTransformer
-        global embed_model
+
+        # 1) Modelo de embeddings (para FAISS)
+        from sentence_transformers import SentenceTransformer, CrossEncoder
+        global embed_model, reranker
+
         if embed_model is None:
-            embed_model = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2", device="cpu")
+            embed_model = SentenceTransformer(
+                "sentence-transformers/all-MiniLM-L6-v2", device="cpu"
+            )
 
-        q_emb = embed_model.encode([q], convert_to_numpy=True, normalize_embeddings=True).astype("float32")
-        D, I = index.search(q_emb, k)
+        # 2) Reranker (Cross-Encoder) para ordenar por relevancia real
+        if reranker is None:
+            reranker = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
 
-        ctx_parts, sources, total = [], [], 0
+        # 3) Recuperación inicial (K grande)
+        q_emb = embed_model.encode(
+            [q], convert_to_numpy=True, normalize_embeddings=True
+        ).astype("float32")
+
+        D, I = index.search(q_emb, k_faiss)
+
+        candidates = []
         for rank, idx in enumerate(I[0]):
-            if idx < 0: 
+            if idx < 0:
                 continue
             m = metas[idx]
             frag = texts[idx] if idx < len(texts) else ""
-            src = {
-                "rank": rank + 1,
-                "source": Path(m.get("source","")).name,
-                "page_from": m.get("page_from"),
-                "page_to": m.get("page_to"),
-                "chunk": m.get("chunk")
+            candidates.append({
+                "faiss_rank": rank + 1,
+                "text": frag,
+                "meta": {
+                    "source": Path(m.get("source", "")).name,
+                    "page_from": m.get("page_from"),
+                    "page_to": m.get("page_to"),
+                    "chunk": m.get("chunk"),
+                }
+            })
+
+        if not candidates:
+            return {
+                "answer": "No encuentro información en los documentos para esta consulta. "
+                          "Intenta con otra redacción o sé más específico.",
+                "sources": []
             }
-            part = f"[{rank+1}] {frag}"
+
+        # 4) Reranking
+        pairs = [(q, c["text"]) for c in candidates]
+        scores = reranker.predict(pairs)  # mayor = más relevante
+        for c, s in zip(candidates, scores):
+            c["rerank_score"] = float(s)
+
+        candidates.sort(key=lambda x: x["rerank_score"], reverse=True)
+        top = candidates[:top_n]
+
+        # 5) Umbral mínimo de confianza
+        if top and top[0]["rerank_score"] < min_rerank_score:
+            return {
+                "answer": ("Según el índice, no hay fragmentos suficientemente relevantes para "
+                           "responder con seguridad. Reformula la pregunta (por ejemplo citando "
+                           "capítulo/artículo o palabra clave concreta)."),
+                "sources": []
+            }
+
+        # 6) Construimos el contexto limitado
+        ctx_parts, sources, total = [], [], 0
+        for i, c in enumerate(top, start=1):
+            part = f"[{i}] {c['text']}"
             if total + len(part) > max_ctx_chars:
                 break
             ctx_parts.append(part)
-            sources.append(src)
+            meta = c["meta"]
+            sources.append({
+                "rank": i,
+                "source": meta["source"],
+                "page_from": meta["page_from"],
+                "page_to": meta["page_to"],
+                "chunk": meta["chunk"]
+            })
             total += len(part)
 
         context = "\n\n".join(ctx_parts) if ctx_parts else "No hay fragmentos recuperados."
 
+        # 7) Prompt estricto y formato de salida
         system_msg = (
             "Eres un asistente experto en ADR 2025, RD 97/2014 y LOTT 9/2013. "
-            "Responde solo con la información del CONTEXTO. "
-            "Si no está en el contexto, responde que no consta en los documentos. "
-            "Sé breve y añade al final una sección 'Fuentes' citando [número] y archivo/páginas."
+            "Respondes ÚNICAMENTE con la información contenida en el CONTEXTO. "
+            "Si la respuesta no está en el CONTEXTO, di literalmente: "
+            "'No consta en los documentos proporcionados.' "
+            "No inventes. Sé conciso y técnico."
         )
-        user_msg = f"Pregunta: {q}\n\nCONTEXTO:\n{context}"
+        user_msg = (
+            f"Pregunta: {q}\n\n"
+            f"CONTEXTO (fragmentos numerados):\n{context}\n\n"
+            "Instrucciones de salida:\n"
+            "1) Respuesta breve y directa.\n"
+            "2) 'Fundamento' con la referencia (Capítulo/Sección/Artículo) si aparece en el texto.\n"
+            "3) 'Fuentes' listando [n] y archivo y páginas.\n"
+            "Si el contexto no cubre la pregunta, responde exactamente: "
+            "'No consta en los documentos proporcionados.'"
+        )
 
         resp = gen_client.chat.completions.create(
             model="gpt-4o-mini",
@@ -162,9 +257,12 @@ def chat(q: str = Query(..., min_length=2), k: int = 5, max_ctx_chars: int = 120
         )
         answer = resp.choices[0].message.content
         return {"answer": answer, "sources": sources}
+
     except Exception as e:
         print(traceback.format_exc())
         return JSONResponse(status_code=500, content={"error": str(e)})
+
+
 
 
 
