@@ -2,21 +2,18 @@
 from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pathlib import Path
-import json
-import zipfile
+import json, zipfile
 import faiss
 
-# ===== RUTAS (relativas a este archivo) =====
-BASE_DIR = Path(__file__).resolve().parent
-FAISS_PATH   = BASE_DIR / "index.faiss"
-ZIP_PATH     = BASE_DIR / "index.zip"
-META_PATH    = BASE_DIR / "metadata.json"
-TEXTS_PATH   = BASE_DIR / "texts.json"   # opcional
+# ===== RUTAS =====
+BASE_DIR   = Path(__file__).resolve().parent
+FAISS_PATH = BASE_DIR / "index.faiss"
+ZIP_PATH   = BASE_DIR / "index.zip"
+META_PATH  = BASE_DIR / "metadata.json"
+TEXTS_PATH = BASE_DIR / "texts.json"   # opcional
 
 # ===== APP =====
 app = FastAPI(title="ADR Search API", version="1.0.0")
-
-# CORS abierto (ajusta a tu dominio si quieres)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -25,11 +22,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ===== ESTADO GLOBAL (carga perezosa) =====
+# ===== ESTADO GLOBAL =====
 index = None
-metas = None
-texts = None
-model = None
+metas  = None
+texts  = None
+model  = None
 
 def ensure_index_file():
     """Si no existe index.faiss, intenta extraer index.zip (si está)."""
@@ -41,32 +38,33 @@ def lazy_init():
     """Carga índice, metadatos, textos y modelo solo la primera vez."""
     global index, metas, texts, model
 
-    # Asegurar que el .faiss existe (extraer del zip si hace falta)
+    # Asegurar índice
     if index is None:
         ensure_index_file()
         index = faiss.read_index(str(FAISS_PATH))
 
+    # Metadatos
     if metas is None:
         with open(META_PATH, "r", encoding="utf-8") as f:
             metas = json.load(f)["metadatas"]
 
+    # Textos (opcional)
     if texts is None:
         if TEXTS_PATH.exists():
             with open(TEXTS_PATH, "r", encoding="utf-8") as f:
                 t = json.load(f)
-            texts[:] = t if isinstance(t, list) else [""] * index.ntotal
+            texts = t if isinstance(t, list) else [""] * index.ntotal
         else:
             texts = [""] * index.ntotal
 
+    # Modelo (carga perezosa)
     if model is None:
-        # Import aquí para no cargar el modelo en el arranque
         from sentence_transformers import SentenceTransformer
         model = SentenceTransformer(
             "sentence-transformers/all-MiniLM-L6-v2",
             device="cpu"
         )
 
-# ===== ENDPOINTS =====
 @app.get("/health")
 def health():
     try:
@@ -79,7 +77,7 @@ def health():
 def search(q: str = Query(..., min_length=2), k: int = 3, preview_chars: int = 500):
     lazy_init()
 
-    # Embedding de la consulta
+    # Embedding consulta
     q_emb = model.encode(
         [q],
         convert_to_numpy=True,
@@ -87,7 +85,7 @@ def search(q: str = Query(..., min_length=2), k: int = 3, preview_chars: int = 5
         normalize_embeddings=True
     ).astype("float32")
 
-    # Búsqueda en FAISS
+    # Búsqueda FAISS
     D, I = index.search(q_emb, k)
 
     results = []
@@ -109,6 +107,8 @@ def search(q: str = Query(..., min_length=2), k: int = 3, preview_chars: int = 5
         })
 
     return {"query": q, "k": k, "results": results}
+
+
 
 
 
