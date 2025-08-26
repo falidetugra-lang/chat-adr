@@ -1,64 +1,61 @@
 # -*- coding: utf-8 -*-
 from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse
 from pathlib import Path
-import os, json, zipfile, traceback
-import faiss
+import os, json, faiss, traceback
+from fastapi.staticfiles import StaticFiles
 
-# ===== RUTAS =====
+# ===== BASE =====
 BASE_DIR   = Path(__file__).resolve().parent
 FAISS_PATH = BASE_DIR / "index.faiss"
-ZIP_PATH   = BASE_DIR / "index.zip"
 META_PATH  = BASE_DIR / "metadata.json"
-TEXTS_PATH = BASE_DIR / "texts.json"   # debe existir para /chat
+TEXTS_PATH = BASE_DIR / "texts.json"
 
 # ===== APP =====
 app = FastAPI(title="ADR Search API", version="1.1.0")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # puedes restringir a tu dominio
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Sirve /web/chat.html (y otros estáticos) desde carpeta public
-app.mount("/web", StaticFiles(directory=str(BASE_DIR / "public")), name="web")
+# Servir archivos estáticos (ej: chat.html dentro de /public)
+if (BASE_DIR / "public").exists():
+    app.mount("/web", StaticFiles(directory=str(BASE_DIR / "public")), name="web")
 
 # ===== ESTADO GLOBAL =====
 index = None
 metas  = None
 texts  = None
-embed_model = None  # embeddings de consulta
-gen_client  = None  # cliente OpenAI para /chat
+embed_model = None
+gen_client  = None
 
-def ensure_index_file():
-    """Si no está index.faiss suelto pero existe index.zip, lo descomprime."""
-    if not FAISS_PATH.exists() and ZIP_PATH.exists():
-        with zipfile.ZipFile(ZIP_PATH, "r") as z:
-            z.extractall(BASE_DIR)
 
 def lazy_init():
-    """Carga FAISS, metadatos, textos y cliente OpenAI (una sola vez)."""
+    """Carga FAISS, metadatos, textos y cliente OpenAI una sola vez."""
     global index, metas, texts, gen_client
+
     if index is None:
-        ensure_index_file()
+        if not FAISS_PATH.exists():
+            raise RuntimeError("No se encuentra index.faiss. Genera el índice con ingest.py")
         index = faiss.read_index(str(FAISS_PATH))
 
     if metas is None:
+        if not META_PATH.exists():
+            raise RuntimeError("No se encuentra metadata.json")
         with open(META_PATH, "r", encoding="utf-8") as f:
             metas = json.load(f)["metadatas"]
 
     if texts is None:
         if not TEXTS_PATH.exists():
-            raise RuntimeError("Falta texts.json (necesario para /chat)")
+            raise RuntimeError("No se encuentra texts.json")
         with open(TEXTS_PATH, "r", encoding="utf-8") as f:
-            t = json.load(f)
-        if not isinstance(t, list):
-            raise RuntimeError("texts.json debe ser una lista de strings (fragmentos)")
-        texts = t
+            texts = json.load(f)
+        if not isinstance(texts, list):
+            raise RuntimeError("texts.json debe ser una lista de strings")
 
     if gen_client is None:
         from openai import OpenAI
@@ -67,7 +64,8 @@ def lazy_init():
             raise RuntimeError("Falta variable OPENAI_API_KEY en Railway")
         gen_client = OpenAI(api_key=api_key)
 
-# ===== HEALTH =====
+
+# ===== ENDPOINTS =====
 @app.get("/health")
 def health():
     try:
@@ -76,7 +74,7 @@ def health():
     except Exception as e:
         return {"status": "error", "detail": str(e)}
 
-# ===== SEARCH =====
+
 @app.get("/search")
 def search(q: str = Query(..., min_length=2), k: int = 3, preview_chars: int = 500):
     try:
@@ -91,7 +89,7 @@ def search(q: str = Query(..., min_length=2), k: int = 3, preview_chars: int = 5
 
         results = []
         for rank, idx in enumerate(I[0]):
-            if idx < 0:
+            if idx < 0: 
                 continue
             m = metas[idx]
             frag = texts[idx] if idx < len(texts) else ""
@@ -111,7 +109,7 @@ def search(q: str = Query(..., min_length=2), k: int = 3, preview_chars: int = 5
         print(traceback.format_exc())
         return JSONResponse(status_code=500, content={"error": str(e)})
 
-# ===== CHAT (RAG) =====
+
 @app.get("/chat")
 def chat(q: str = Query(..., min_length=2), k: int = 5, max_ctx_chars: int = 12000):
     try:
@@ -126,7 +124,7 @@ def chat(q: str = Query(..., min_length=2), k: int = 5, max_ctx_chars: int = 120
 
         ctx_parts, sources, total = [], [], 0
         for rank, idx in enumerate(I[0]):
-            if idx < 0:
+            if idx < 0: 
                 continue
             m = metas[idx]
             frag = texts[idx] if idx < len(texts) else ""
@@ -147,8 +145,9 @@ def chat(q: str = Query(..., min_length=2), k: int = 5, max_ctx_chars: int = 120
         context = "\n\n".join(ctx_parts) if ctx_parts else "No hay fragmentos recuperados."
 
         system_msg = (
-            "Eres un asistente experto en ADR, RD 97/2014 y LOTT 9/2013. "
-            "Responde solo con la información del CONTEXTO. Si no está en el contexto, dilo claramente. "
+            "Eres un asistente experto en ADR 2025, RD 97/2014 y LOTT 9/2013. "
+            "Responde solo con la información del CONTEXTO. "
+            "Si no está en el contexto, responde que no consta en los documentos. "
             "Sé breve y añade al final una sección 'Fuentes' citando [número] y archivo/páginas."
         )
         user_msg = f"Pregunta: {q}\n\nCONTEXTO:\n{context}"
@@ -166,6 +165,8 @@ def chat(q: str = Query(..., min_length=2), k: int = 5, max_ctx_chars: int = 120
     except Exception as e:
         print(traceback.format_exc())
         return JSONResponse(status_code=500, content={"error": str(e)})
+
+
 
 
 
