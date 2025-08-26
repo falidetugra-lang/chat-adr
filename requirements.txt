@@ -1,12 +1,22 @@
 --extra-index-url https://download.pytorch.org/whl/cpu
 fastapi==0.110.0
 uvicorn[standard]==0.29.0
+
+# PyTorch CPU
 torch==2.3.1+cpu
+
+# NLP stack estable entre sí
 sentence-transformers==2.2.2
 transformers==4.36.2
 huggingface_hub==0.16.4
+tokenizers==0.15.2
+safetensors==0.4.2
+
+# FAISS CPU + base
 faiss-cpu==1.8.0.post1
 numpy==1.26.4
+
+
 
 
 
