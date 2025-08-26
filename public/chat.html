@@ -21,45 +21,50 @@
     <button id="send">Preguntar</button>
   </div>
 
-  <script>
-   const API_BASE = "https://chat-adr-production.up.railway.app";
+ <script>
+  const API_BASE = "https://chat-adr-production.up.railway.app";
+  const log = document.getElementById('log');
+  const q   = document.getElementById('q');
+  const btn = document.getElementById('send');
 
-    const log = document.getElementById('log');
-    const q   = document.getElementById('q');
-    const btn = document.getElementById('send');
+  async function ask() {
+    const query = q.value.trim();
+    if (!query) return;
+    log.innerHTML += `<div class="msg-user">🧑‍💼 ${query}</div>`;
+    q.value = ""; btn.disabled = true;
 
-    async function ask() {
-      const query = q.value.trim();
-      if (!query) return;
-      log.innerHTML += `<div class="msg-user">🧑‍💼 ${query}</div>`;
-      q.value = ""; btn.disabled = true;
-
+    try {
+      const r = await fetch(`${API_BASE}/chat?q=` + encodeURIComponent(query));
+      let data;
       try {
-        const r = await fetch(`${API_BASE}/chat?q=` + encodeURIComponent(query));
-        const data = await r.json();
-        if (data.answer) {
-          let src = "";
-          if (Array.isArray(data.sources)) {
-            const lines = data.sources.map(s => {
-              const p = (s.page_from!=null || s.page_to!=null) ? ` (p. ${s.page_from}-${s.page_to})` : "";
-              return ` [${s.rank}] ${s.source}${p}`;
-            });
-            src = `\n\nFuentes:\n${lines.join("\n")}`;
-          }
-          log.innerHTML += `<div class="msg-bot">🤖 ${data.answer}${src}</div>`;
-        } else {
-          log.innerHTML += `<div class="msg-bot">⚠️ Error: ${JSON.stringify(data)}</div>`;
-        }
-      } catch(e) {
-        log.innerHTML += `<div class="msg-bot">❌ ${e}</div>`;
-      } finally {
-        btn.disabled = false;
-        log.scrollTop = log.scrollHeight;
+        data = await r.json();
+      } catch {
+        const txt = await r.text();
+        throw new Error(`${r.status} ${r.statusText}: ${txt}`);
       }
+      if (data.answer) {
+        let src = "";
+        if (Array.isArray(data.sources)) {
+          const lines = data.sources.map(s => {
+            const p = (s.page_from!=null || s.page_to!=null) ? ` (p. ${s.page_from}-${s.page_to})` : "";
+            return ` [${s.rank}] ${s.source}${p}`;
+          });
+          src = `\n\nFuentes:\n${lines.join("\n")}`;
+        }
+        log.innerHTML += `<div class="msg-bot">🤖 ${data.answer}${src}</div>`;
+      } else {
+        log.innerHTML += `<div class="msg-bot">⚠️ ${JSON.stringify(data)}</div>`;
+      }
+    } catch(e) {
+      log.innerHTML += `<div class="msg-bot">❌ ${e.message || e}</div>`;
+    } finally {
+      btn.disabled = false;
+      log.scrollTop = log.scrollHeight;
     }
+  }
 
-    btn.onclick = ask;
-    q.addEventListener('keydown', (e) => { if (e.key === 'Enter') ask(); });
-  </script>
+  btn.onclick = ask;
+  q.addEventListener('keydown', (e) => { if (e.key === 'Enter') ask(); });
+</script>
 </body>
 </html>
