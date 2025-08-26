@@ -1,23 +1,13 @@
---extra-index-url https://download.pytorch.org/whl/cpu
-fastapi==0.110.0
-uvicorn[standard]==0.29.0
-
-# PyTorch CPU
-torch==2.3.1+cpu
-
-# Stack NLP compatibles entre sí
 sentence-transformers==2.2.2
 transformers==4.30.2
 huggingface_hub==0.16.4
 tokenizers==0.13.3
 safetensors==0.3.1
-
-# FAISS + base
 faiss-cpu==1.8.0.post1
 numpy==1.26.4
+openai>=1.30.0
 
-# OpenAI SDK
-openai>=1.35.0
+
 
 
 
