@@ -21,7 +21,7 @@ app = FastAPI(title="ADR Search API", version="1.2.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"],   # restringe a tu dominio si quieres
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -228,30 +228,29 @@ def chat(q: str = Query(..., min_length=2),
 
         context = "\n\n".join(ctx_parts) if ctx_parts else "No hay fragmentos recuperados."
 
-        # 7) Prompt estricto y formato de salida
-       system_msg = (
-    "Eres un asistente experto en normativa de transporte de mercancías peligrosas. "
-    "Tu conocimiento proviene únicamente de tres fuentes documentales: "
-    "ADR 2025, RD 97/2014 y LOTT 9/2013. "
-    "NO debes usar información externa ni inventar. "
-    "Si la respuesta no está en el CONTEXTO proporcionado, responde exactamente: "
-    "'No consta en los documentos proporcionados.' "
-    "Responde siempre de forma concisa, clara y técnica, en español. "
-    "Usa un tono profesional, como un consejero de seguridad ADR. "
-    "No hagas interpretaciones ni consejos prácticos fuera del texto normativo. "
-)
+        # 7) Prompt estricto y formato de salida (CORREGIDO e indentado)
+        system_msg = (
+            "Eres un asistente experto en normativa de transporte de mercancías peligrosas. "
+            "Tu conocimiento proviene únicamente de tres fuentes documentales: "
+            "ADR 2025, RD 97/2014 y LOTT 9/2013. "
+            "NO debes usar información externa ni inventar. "
+            "Si la respuesta no está en el CONTEXTO proporcionado, responde exactamente: "
+            "'No consta en los documentos proporcionados.' "
+            "Responde siempre de forma concisa, clara y técnica, en español. "
+            "Usa un tono profesional, como un consejero de seguridad ADR. "
+            "No hagas interpretaciones ni consejos prácticos fuera del texto normativo."
+        )
 
-user_msg = (
-    f"Pregunta del usuario: {q}\n\n"
-    f"CONTEXTO (fragmentos numerados del índice legal):\n{context}\n\n"
-    "Instrucciones de salida:\n"
-    "1) Responde de manera breve (máx. 5 líneas) y solo con información del CONTEXTO.\n"
-    "2) Si corresponde, incluye 'Fundamento: Artículo/Capítulo/Sección' según aparezca en el texto.\n"
-    "3) Añade una sección final 'Fuentes:' citando [n] archivo y páginas.\n"
-    "4) Si la información no se encuentra en el CONTEXTO, responde únicamente: "
-    "'No consta en los documentos proporcionados.'\n"
-)
-
+        user_msg = (
+            f"Pregunta del usuario: {q}\n\n"
+            f"CONTEXTO (fragmentos numerados del índice legal):\n{context}\n\n"
+            "Instrucciones de salida:\n"
+            "1) Responde de manera breve (máx. 5 líneas) y solo con información del CONTEXTO.\n"
+            "2) Si corresponde, incluye 'Fundamento: Artículo/Capítulo/Sección' según aparezca en el texto.\n"
+            "3) Añade una sección final 'Fuentes:' citando [n] archivo y páginas.\n"
+            "4) Si la información no se encuentra en el CONTEXTO, responde únicamente: "
+            "'No consta en los documentos proporcionados.'\n"
+        )
 
         resp = gen_client.chat.completions.create(
             model="gpt-4o-mini",
@@ -267,6 +266,8 @@ user_msg = (
     except Exception as e:
         print(traceback.format_exc())
         return JSONResponse(status_code=500, content={"error": str(e)})
+
+
 
 
 
