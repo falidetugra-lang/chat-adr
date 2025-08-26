@@ -2,6 +2,9 @@ fastapi
 uvicorn[standard]
 sentence-transformers
 faiss-cpu
+numpy
+
+
 
 
 
