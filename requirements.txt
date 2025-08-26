@@ -5,16 +5,18 @@ uvicorn[standard]==0.29.0
 # PyTorch CPU
 torch==2.3.1+cpu
 
-# NLP stack estable entre sí
+# Stack NLP compatibles entre sí
 sentence-transformers==2.2.2
-transformers==4.36.2
+transformers==4.30.2
 huggingface_hub==0.16.4
-tokenizers==0.15.2
-safetensors==0.4.2
+tokenizers==0.13.3
+safetensors==0.3.1
 
-# FAISS CPU + base
+# FAISS + base
 faiss-cpu==1.8.0.post1
 numpy==1.26.4
+
+
 
 
 
