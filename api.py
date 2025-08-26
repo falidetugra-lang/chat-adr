@@ -8,36 +8,34 @@ from sentence_transformers import SentenceTransformer
 import faiss, json
 from pathlib import Path
 
-# ==== Config ====
-BASE_DIR  = Path(r"C:\Users\pc\Documents\Personal\Marca personal\chat_ADR")
-INDEX_DIR = BASE_DIR / "index"
-MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
-DEVICE = "cpu"
+# ==== Config (rutas relativas al repo) ====
+from pathlib import Path
+BASE_DIR = Path(__file__).resolve().parent
 
-FAISS_PATH = INDEX_DIR / "index.faiss"
-META_PATH  = INDEX_DIR / "metadata.json"
-TEXTS_PATH = INDEX_DIR / "texts.json"
-
-# ==== App ====
-app = FastAPI(title="ADR Search API", version="1.0.0")
-
-# Habilitar CORS (permite que cualquier web haga consultas a la API)
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],   # puedes restringir a ["https://tu-dominio.com"]
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# Si tus archivos están en la raíz del repo (según tu captura)
+FAISS_PATH = BASE_DIR / "index.faiss"
+META_PATH  = BASE_DIR / "metadata.json"
+TEXTS_PATH = BASE_DIR / "texts.json"   # opcional; si no existe, seguimos igual
 
 # ==== Carga de índice y modelo ====
+import faiss, json
+from sentence_transformers import SentenceTransformer
+
 index = faiss.read_index(str(FAISS_PATH))
+
 with open(META_PATH, "r", encoding="utf-8") as f:
     metas = json.load(f)["metadatas"]
-with open(TEXTS_PATH, "r", encoding="utf-8") as f:
-    texts = json.load(f)
 
-model = SentenceTransformer(MODEL_NAME, device=DEVICE)
+# texts.json es opcional: si no está, devolvemos texto vacío
+if TEXTS_PATH.exists():
+    with open(TEXTS_PATH, "r", encoding="utf-8") as f:
+        texts = json.load(f)
+else:
+    texts = [""] * index.ntotal
+
+MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
+model = SentenceTransformer(MODEL_NAME, device="cpu")
+
 
 # ==== Endpoints ====
 @app.get("/health")
@@ -71,3 +69,4 @@ def search(q: str = Query(..., min_length=2), k: int = 3, preview_chars: int = 5
             "text": frag_show
         })
     return {"query": q, "k": k, "results": results}
+
