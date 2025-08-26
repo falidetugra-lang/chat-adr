@@ -4,6 +4,9 @@ openai>=1.40.0
 faiss-cpu==1.8.0      # si sigues usando FAISS local
 numpy
 tiktoken
+fastapi
+uvicorn[standard]
+
 
 
 
